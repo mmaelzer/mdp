@@ -3,6 +3,17 @@ markdown for what
 
 A CLI that takes markdown files as input and outputs HTML pages.
 
+Example
+-------
+```bash
+$ git clone git@github.com:mmaelzer/markdown-for-what
+$ cd markdown-for-what
+$ go build mdfw.md
+$ mdfw -i ~/mysite/src/*.md -o ~/mysite/html/ -t ~/mysite/src/layout.html
+```
+
+Usage
+-------
 ```
 NAME:
    mdfw - Static site generator for markdown source files
