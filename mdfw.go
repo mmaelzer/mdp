@@ -1,8 +1,10 @@
 package main
 
 import (
+    "fmt"
     "os"
     "path"
+    "regexp"
     "github.com/codegangsta/cli"
     "path/filepath"
     "io/ioutil"
@@ -10,7 +12,7 @@ import (
     "github.com/russross/blackfriday"
 )
 
-var DEFAULT_TEMPLATE = "<html><head><title>{{.Title}}</title></head><body>{{.Body}}</body></html>"
+var DEFAULT_TEMPLATE = "<html><head><title>{{.Filename}}</title></head><body>{{.Body}}</body></html>"
 
 var CLI_FLAGS = []cli.Flag {
     cli.StringFlag{
@@ -30,9 +32,11 @@ var CLI_FLAGS = []cli.Flag {
     },
 }
 
+var fileSanitizeRegex = regexp.MustCompile("[-_+.]")
+
 type Page struct {
     Body string
-    Title string
+    Filename string
 }
 
 func main() {
@@ -40,37 +44,62 @@ func main() {
     app.Name = "markdown-for-what"
     app.Usage = "Static site generator for markdown source files"
     app.Flags = CLI_FLAGS
-    app.Action = func(c *cli.Context) {     
-        layout := c.String("template")
-        if layout != DEFAULT_TEMPLATE {
-            templateFile, err := ioutil.ReadFile(layout)
-            if err != nil { panic(err) }
-            layout = string(templateFile)
-        }
-        matches, _ := filepath.Glob(c.String("input"))
-        destDir := c.String("output")
-        for _, filename := range matches {
-            var extension = filepath.Ext(filename)
-            var outputName = path.Base(filename[0:len(filename) - len(extension)])
-
-            mdfile, err := ioutil.ReadFile(filename)
-            if err != nil { panic(err) }
-
-            md := blackfriday.MarkdownCommon(mdfile)
-            page := Page{string(md), outputName}
-
-            tmpl, err := template.New(outputName).Parse(layout)
-
-            if err != nil { panic(err) }
-
-            f, err := os.Create(path.Join(destDir, outputName + ".html"))
-
-            if err != nil { panic(err) }
-
-            tmpl.Execute(f, page)
-
-            f.Close()
-        }
-    }
+    app.Action = run
     app.Run(os.Args)
+}
+
+func cleanFilename(filename string) string {
+    return fileSanitizeRegex.ReplaceAllString(filename, " ")
+}
+
+func run(c *cli.Context) {
+    layout := c.String("template")
+    if layout != DEFAULT_TEMPLATE {
+        templateFile, err := ioutil.ReadFile(layout)
+        if err != nil { 
+            fmt.Printf("Unable to read template file %s: %s\n", layout, err)
+            os.Exit(1)
+        }
+        layout = string(templateFile)
+    }
+
+    matches, _ := filepath.Glob(c.String("input"))
+    if len(matches) == 0 {
+        fmt.Printf("No files found with input \"%s\"\n", c.String("input"))
+        os.Exit(1)
+    }
+
+    destDir := c.String("output")
+
+    for _, filename := range matches {
+        extension := filepath.Ext(filename)
+        outputName := path.Base(filename[0:len(filename) - len(extension)])
+
+        mdfile, err := ioutil.ReadFile(filename)
+        if err != nil { 
+            fmt.Printf("Unable to read %s: %s\n", filename, err)
+            os.Exit(1)
+        }
+
+        md := blackfriday.MarkdownCommon(mdfile)
+        page := Page{string(md), cleanFilename(outputName)}
+
+        tmpl, err := template.New(outputName).Parse(layout)
+
+        if err != nil { 
+            fmt.Printf("Unable to create template for %s: %s\n", filename, err)
+            os.Exit(1)
+        }
+
+        outputFilename := outputName + ".html"
+        f, err := os.Create(path.Join(destDir, outputFilename))
+        if err != nil { 
+            fmt.Printf("Unable to create new html file %s: %s\n", outputFilename, err)
+            os.Exit(1)
+        }
+
+        tmpl.Execute(f, page)
+
+        f.Close()
+    }
 }
