@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "os"
+    "errors"
     "path"
     "regexp"
     "github.com/codegangsta/cli"
@@ -52,54 +53,78 @@ func cleanFilename(filename string) string {
     return fileSanitizeRegex.ReplaceAllString(filename, " ")
 }
 
+func handleError(errorStr string) {
+    fmt.Println(errorStr)
+    os.Exit(1)
+}
+
 func run(c *cli.Context) {
     layout := c.String("template")
     if layout != DEFAULT_TEMPLATE {
         templateFile, err := ioutil.ReadFile(layout)
         if err != nil { 
-            fmt.Printf("Unable to read template file %s: %s\n", layout, err)
-            os.Exit(1)
+            handleError(fmt.Sprintf("Unable to read template file %s: %s", layout, err))
         }
         layout = string(templateFile)
     }
 
     matches, _ := filepath.Glob(c.String("input"))
     if len(matches) == 0 {
-        fmt.Printf("No files found with input \"%s\"\n", c.String("input"))
-        os.Exit(1)
+        handleError(fmt.Sprintf("No files found with input \"%s\"", c.String("input")))
     }
 
     destDir := c.String("output")
 
     for _, filename := range matches {
-        extension := filepath.Ext(filename)
-        outputName := path.Base(filename[0:len(filename) - len(extension)])
-
-        mdfile, err := ioutil.ReadFile(filename)
-        if err != nil { 
-            fmt.Printf("Unable to read %s: %s\n", filename, err)
-            os.Exit(1)
+        err := generateHtmlFile(c, layout, destDir, filename)
+        if err != nil {
+            handleError(err.Error())
         }
-
-        md := blackfriday.MarkdownCommon(mdfile)
-        page := Page{string(md), cleanFilename(outputName)}
-
-        tmpl, err := template.New(outputName).Parse(layout)
-
-        if err != nil { 
-            fmt.Printf("Unable to create template for %s: %s\n", filename, err)
-            os.Exit(1)
-        }
-
-        outputFilename := outputName + ".html"
-        f, err := os.Create(path.Join(destDir, outputFilename))
-        if err != nil { 
-            fmt.Printf("Unable to create new html file %s: %s\n", outputFilename, err)
-            os.Exit(1)
-        }
-
-        tmpl.Execute(f, page)
-
-        f.Close()
     }
+}
+
+func generateHtmlFile(c *cli.Context, layout string, destDir string, filename string) error {
+    extension := filepath.Ext(filename)
+    outputName := path.Base(filename[0:len(filename) - len(extension)])
+    srcFstat, err := os.Stat(filename)
+
+    if err != nil {
+        return errors.New(fmt.Sprintf("Unable to get FileInfo for %s", filename))
+    }
+
+    mdfile, err := ioutil.ReadFile(filename)
+    if err != nil {
+        return errors.New(fmt.Sprintf("Unable to read %s: %s", filename, err))
+    }
+
+    md := blackfriday.MarkdownCommon(mdfile)
+    page := Page{string(md), cleanFilename(outputName)}
+
+    tmpl, err := template.New(outputName).Parse(layout)
+
+    if err != nil {
+        return errors.New(fmt.Sprintf("Unable to create template for %s: %s", filename, err))
+    }
+
+    outputFile := path.Join(destDir, outputName + ".html")
+    f, err := os.Create(outputFile)
+    if err != nil {
+        return errors.New(fmt.Sprintf("Unable to create new html file %s: %s", outputFile, err))
+    }
+
+    tmpl.Execute(f, page)
+
+    f.Close()
+
+    // Set access and modify times so they're useful when
+    // programatically generating an index file.
+    os.Chtimes(outputFile, srcFstat.ModTime(), srcFstat.ModTime())
+
+    // Printing the absolute path to the output file
+    // so that it can be potentially piped to other command
+    // line tools.
+    absPath, _ := filepath.Abs(outputFile)
+    fmt.Println(absPath)
+
+    return nil
 }
