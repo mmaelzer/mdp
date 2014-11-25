@@ -6,6 +6,7 @@ import (
     "errors"
     "path"
     "regexp"
+    "strconv"
     "github.com/codegangsta/cli"
     "path/filepath"
     "io/ioutil"
@@ -38,6 +39,8 @@ var fileSanitizeRegex = regexp.MustCompile("[-_+.]")
 type Page struct {
     Body string
     Filename string
+    UnixTime string
+    Date string
 }
 
 func main() {
@@ -98,7 +101,14 @@ func generateHtmlFile(c *cli.Context, layout string, destDir string, filename st
     }
 
     md := blackfriday.MarkdownCommon(mdfile)
-    page := Page{string(md), cleanFilename(outputName)}
+    time := srcFstat.ModTime()
+
+    page := Page{
+        Body: string(md),
+        Filename: cleanFilename(outputName), 
+        UnixTime: strconv.FormatInt(time.Unix(), 10),
+        Date: time.Format("January 2, 2006"),
+    }
 
     tmpl, err := template.New(outputName).Parse(layout)
 
@@ -118,7 +128,7 @@ func generateHtmlFile(c *cli.Context, layout string, destDir string, filename st
 
     // Set access and modify times so they're useful when
     // programatically generating an index file.
-    os.Chtimes(outputFile, srcFstat.ModTime(), srcFstat.ModTime())
+    os.Chtimes(outputFile, time, time)
 
     // Printing the absolute path to the output file
     // so that it can be potentially piped to other command
