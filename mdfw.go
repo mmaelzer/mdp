@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bytes"
     "fmt"
     "os"
     "errors"
@@ -11,10 +12,12 @@ import (
     "path/filepath"
     "io/ioutil"
     "text/template"
+    htmltemplate "html/template"
     "github.com/russross/blackfriday"
 )
 
-var DEFAULT_TEMPLATE = "<html><head><title>{{.Filename}}</title></head><body>{{.Body}}</body></html>"
+const DEFAULT_TEMPLATE string = "<html><head><title>{{.Filename}}</title></head><body>{{.Body}}</body></html>"
+var fileSanitizeRegex = regexp.MustCompile("[-_+.]")
 
 var CLI_FLAGS = []cli.Flag {
     cli.StringFlag{
@@ -32,15 +35,21 @@ var CLI_FLAGS = []cli.Flag {
         Value: "./",
         Usage: "Location to write HTML files to",
     },
+    cli.StringFlag{
+        Name: "author, a",
+        Value: "",
+        Usage: "Author name for template: {{.Author}}",
+    },
 }
 
-var fileSanitizeRegex = regexp.MustCompile("[-_+.]")
-
+// Page struct is passed into the templates (base and final)
+// to assist in generating html files.
 type Page struct {
     Body string
     Filename string
     UnixTime string
     Date string
+    Author string
 }
 
 func main() {
@@ -52,10 +61,14 @@ func main() {
     app.Run(os.Args)
 }
 
+// cleanFilename takes a file name and makes it readable
+// so that it can be inserted as standard text into a document
 func cleanFilename(filename string) string {
     return fileSanitizeRegex.ReplaceAllString(filename, " ")
 }
 
+// handleError takes a string describing an error,
+// prints the string and exits with a non-zero int.
 func handleError(errorStr string) {
     fmt.Println(errorStr)
     os.Exit(1)
@@ -86,6 +99,10 @@ func run(c *cli.Context) {
     }
 }
 
+// generateHtmlFile takes a cli.Context, layout, destination, and source file
+// it reads the source markdown file, applies templates, and writes the 
+// result to an html file
+// TODO: Refactor away from single large function
 func generateHtmlFile(c *cli.Context, layout string, destDir string, filename string) error {
     extension := filepath.Ext(filename)
     outputName := path.Base(filename[0:len(filename) - len(extension)])
@@ -108,12 +125,13 @@ func generateHtmlFile(c *cli.Context, layout string, destDir string, filename st
         Filename: cleanFilename(outputName), 
         UnixTime: strconv.FormatInt(time.Unix(), 10),
         Date: time.Format("January 2, 2006"),
+        Author: c.String("author"),
     }
 
-    tmpl, err := template.New(outputName).Parse(layout)
+    btmpl, err := template.New(fmt.Sprintf("%s-base", outputName)).Parse(layout)
 
     if err != nil {
-        return errors.New(fmt.Sprintf("Unable to create template for %s: %s", filename, err))
+        return errors.New(fmt.Sprintf("Unable to create base template for %s: %s", filename, err))
     }
 
     outputFile := path.Join(destDir, outputName + ".html")
@@ -122,7 +140,16 @@ func generateHtmlFile(c *cli.Context, layout string, destDir string, filename st
         return errors.New(fmt.Sprintf("Unable to create new html file %s: %s", outputFile, err))
     }
 
-    tmpl.Execute(f, page)
+    var b bytes.Buffer
+    btmpl.Execute(&b, page)
+
+    ftmpl, err := htmltemplate.New(fmt.Sprintf("%s-final", outputName)).Parse(b.String())
+
+    if err != nil {
+        return errors.New(fmt.Sprintf("Unable to create final template for %s: %s", filename, err))
+    }
+
+    ftmpl.Execute(f, page)
 
     f.Close()
 
