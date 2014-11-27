@@ -76,8 +76,8 @@ type Page struct {
 
 func main() {
     app := cli.NewApp()
-    app.Name = "markdown-for-what"
-    app.Usage = "Static site generator for markdown source files"
+    app.Name = "mdp"
+    app.Usage = "Static page generator for markdown source files"
     app.Flags = CLI_FLAGS
     app.Action = run
     app.Run(os.Args)
