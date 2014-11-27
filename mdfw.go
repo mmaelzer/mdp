@@ -102,23 +102,27 @@ func run(c *cli.Context) {
 // generateHtmlFile takes a cli.Context, layout, destination, and source file
 // it reads the source markdown file, applies templates, and writes the 
 // result to an html file
-// TODO: Refactor away from single large function
 func generateHtmlFile(c *cli.Context, layout string, destDir string, filename string) error {
     extension := filepath.Ext(filename)
     outputName := path.Base(filename[0:len(filename) - len(extension)])
+    
     srcFstat, err := os.Stat(filename)
-
     if err != nil {
         return errors.New(fmt.Sprintf("Unable to get FileInfo for %s", filename))
-    }
+    }    
+    time := srcFstat.ModTime()
 
     mdfile, err := ioutil.ReadFile(filename)
     if err != nil {
         return errors.New(fmt.Sprintf("Unable to read %s: %s", filename, err))
     }
-
     md := blackfriday.MarkdownCommon(mdfile)
-    time := srcFstat.ModTime()
+
+    outputFile := path.Join(destDir, outputName + ".html")
+    f, err := os.Create(outputFile)
+    if err != nil {
+        return errors.New(fmt.Sprintf("Unable to create new html file %s: %s", outputFile, err))
+    }
 
     page := Page{
         Body: string(md),
@@ -127,30 +131,13 @@ func generateHtmlFile(c *cli.Context, layout string, destDir string, filename st
         Date: time.Format("January 2, 2006"),
         Author: c.String("author"),
     }
-
-    btmpl, err := template.New(fmt.Sprintf("%s-base", outputName)).Parse(layout)
-
-    if err != nil {
-        return errors.New(fmt.Sprintf("Unable to create base template for %s: %s", filename, err))
-    }
-
-    outputFile := path.Join(destDir, outputName + ".html")
-    f, err := os.Create(outputFile)
-    if err != nil {
-        return errors.New(fmt.Sprintf("Unable to create new html file %s: %s", outputFile, err))
-    }
-
-    var b bytes.Buffer
-    btmpl.Execute(&b, page)
-
-    ftmpl, err := htmltemplate.New(fmt.Sprintf("%s-final", outputName)).Parse(b.String())
+    tmp, err := applyTemplate(outputFile, layout, page)
 
     if err != nil {
-        return errors.New(fmt.Sprintf("Unable to create final template for %s: %s", filename, err))
+        return err
     }
 
-    ftmpl.Execute(f, page)
-
+    f.WriteString(tmp)
     f.Close()
 
     // Set access and modify times so they're useful when
@@ -164,4 +151,29 @@ func generateHtmlFile(c *cli.Context, layout string, destDir string, filename st
     fmt.Println(absPath)
 
     return nil
+}
+
+// applyTemplate will generate a template from the layout and apply
+// the template to the page twice. The first apply adds
+// template objects defined in the layout. The second pass
+// adds any template objects defined in the body.
+func applyTemplate(templateName string, layout string, page Page) (string, error) {
+    btmpl, err := template.New(fmt.Sprintf("%s-base", templateName)).Parse(layout)
+
+    if err != nil {
+        return "", errors.New(fmt.Sprintf("Unable to create base template for %s: %s", templateName, err))
+    }
+
+    var b bytes.Buffer
+    btmpl.Execute(&b, page)
+
+    ftmpl, err := htmltemplate.New(fmt.Sprintf("%s-final", templateName)).Parse(b.String())
+
+    if err != nil {
+        return "", errors.New(fmt.Sprintf("Unable to create final template for %s: %s", templateName, err))
+    }
+
+    var f bytes.Buffer
+    ftmpl.Execute(&f, page)
+    return f.String(), nil
 }
