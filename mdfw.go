@@ -7,6 +7,7 @@ import (
     "errors"
     "path"
     "regexp"
+    "sort"
     "strconv"
     "github.com/codegangsta/cli"
     "path/filepath"
@@ -42,6 +43,27 @@ var CLI_FLAGS = []cli.Flag {
     },
 }
 
+// FileAndInfo struct is useful when needing to hold onto
+// the original file path when passing around fileinfo
+type FileAndInfo struct {
+    info os.FileInfo
+    path string
+}
+
+type ByModTime []FileAndInfo
+
+func (f ByModTime) Len() int {
+    return len(f)
+}
+
+func (f ByModTime) Swap(i, j int) {
+    f[i], f[j] = f[j], f[i]
+}
+
+func (f ByModTime) Less(i, j int) bool {
+    return f[i].info.ModTime().Before(f[j].info.ModTime())
+}
+
 // Page struct is passed into the templates (base and final)
 // to assist in generating html files.
 type Page struct {
@@ -69,9 +91,11 @@ func cleanFilename(filename string) string {
 
 // handleError takes a string describing an error,
 // prints the string and exits with a non-zero int.
-func handleError(errorStr string) {
-    fmt.Println(errorStr)
-    os.Exit(1)
+func handleError(e error) {
+    if e != nil {
+        fmt.Println(e.Error())
+        os.Exit(1)
+    }
 }
 
 func run(c *cli.Context) {
@@ -79,38 +103,41 @@ func run(c *cli.Context) {
     if layout != DEFAULT_TEMPLATE {
         templateFile, err := ioutil.ReadFile(layout)
         if err != nil { 
-            handleError(fmt.Sprintf("Unable to read template file %s: %s", layout, err))
+            handleError(errors.New(fmt.Sprintf("Unable to read template file %s: %s", layout, err)))
         }
         layout = string(templateFile)
     }
 
     matches, _ := filepath.Glob(c.String("input"))
     if len(matches) == 0 {
-        handleError(fmt.Sprintf("No files found with input \"%s\"", c.String("input")))
+        handleError(errors.New(fmt.Sprintf("No files found with input \"%s\"", c.String("input"))))
     }
 
     destDir := c.String("output")
 
+    var finfos []FileAndInfo
     for _, filename := range matches {
-        err := generateHtmlFile(c, layout, destDir, filename)
-        if err != nil {
-            handleError(err.Error())
-        }
+        stat, err := os.Stat(filename)
+        handleError(err)
+        finfos = append(finfos, FileAndInfo{stat, filename})
+    }
+
+    sort.Sort(ByModTime(finfos))
+
+    for _, finfo := range finfos {
+        err := generateHtmlFile(c, layout, destDir, finfo)
+        handleError(err)
     }
 }
 
 // generateHtmlFile takes a cli.Context, layout, destination, and source file
 // it reads the source markdown file, applies templates, and writes the 
 // result to an html file
-func generateHtmlFile(c *cli.Context, layout string, destDir string, filename string) error {
+func generateHtmlFile(c *cli.Context, layout string, destDir string, finfo FileAndInfo) error {
+    filename := finfo.path
+    time := finfo.info.ModTime()
     extension := filepath.Ext(filename)
     outputName := path.Base(filename[0:len(filename) - len(extension)])
-    
-    srcFstat, err := os.Stat(filename)
-    if err != nil {
-        return errors.New(fmt.Sprintf("Unable to get FileInfo for %s", filename))
-    }    
-    time := srcFstat.ModTime()
 
     mdfile, err := ioutil.ReadFile(filename)
     if err != nil {

@@ -9,7 +9,10 @@ Example
 $ git clone git@github.com:mmaelzer/markdown-for-what
 $ cd markdown-for-what
 $ go build mdfw.md
-$ mdfw -i ~/mysite/src/*.md -o ~/mysite/html/ -t ~/mysite/src/layout.html
+$ mdfw -i "~/mysite/src/*.md" -o ~/mysite/html/ -t ~/mysite/src/layout.html
+/home/myuser/mysite/html/post1.html
+/home/myuser/mysite/html/post2.html
+/home/myuser/mysite/html/post3.html
 ```
 
 Usage
